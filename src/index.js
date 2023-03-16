@@ -1,114 +1,131 @@
-import './sass/index.scss';
-
-import { getImg } from '/src/fetch.js';
-
 import Notiflix from 'notiflix';
-
-
+import { Notify } from 'notiflix/build/notiflix-notify-aio';
 import SimpleLightbox from 'simplelightbox';
 import 'simplelightbox/dist/simple-lightbox.min.css';
+import { fetchImages } from './fetch';
 
-const qs = (selector) => document.querySelector(selector);
-
-const searchForm = qs(".search-form");
-const searchFormInput = qs(".search-form__input");
-const loadMore = qs(".load-more");
-const gallery = qs(".gallery");
-
-let pagination;
-let displayedImages;
-let totalOfHits;
-let lightbox;
+const refs = {
+  form: document.querySelector('.search-form'),
+  input: document.querySelector('[type="text"]'),
+  btn: document.querySelector('[type="submit"]'),
+  galleryItems: document.querySelector('.gallery'),
+  btnLoad: document.querySelector('.load-more'),
+  textCollections: document.querySelector('.text-Collections'),
+};
 
 
-searchForm.addEventListener("submit", newSearch);
-
-
-loadMore.addEventListener("click", loadMoreImg);
-
-function newSearch(e) {
-  e.preventDefault();
-  loadMore.style.display = "none"
-  pagination = 1;
-  displayedImages = 0;
-  searchingImages();
-  gallery.innerHTML = "";
-}
-
-function loadMoreImg() {
-  pagination += 1;
-  searchingImages();
-}
-
-function searchingImages() {
-    getImg(searchFormInput.value, pagination)
-    .then(images => {
-      renderImages(images);
-    })
-    .catch(error => console.log(error));
-}
-
-
-function renderImages({hits, totalHits}) {
-  totalOfHits = totalHits;
-
-  const markups = hits.map(({webformatURL, largeImageURL, tags, likes, views, comments, downloads}) => `
-  <div class="gallery__item">
-    <a class="gallery__link" href="${largeImageURL}"><img class="gallery__img" src="${webformatURL}" alt="${tags}" loading="lazy" /></a>
-    <div class="gallery__info">
-      <p class="info__item">
-        <b class="info__label">Likes</b>
-        <span class="info__data">${likes}</span>
-      </p>
-      <p class="info__item">
-        <b class="info__label">Views</b>
-        <span class="info__data">${views}</span>
-      </p>
-      <p class="info__item">
-        <b class="info__label">Comments</b>
-        <span class="info__data">${comments}</span>
-      </p>
-      <p class="info__item">
-        <b class="info__label">Downloads</b>
-        <span class="info__data">${downloads}</span>
-      </p>
-    </div>
+function renderImages(array) {
+  const markup = array
+    .map(
+      ({
+        webformatURL,
+        largeImageURL,
+        tags,
+        likes,
+        views,
+        comments,
+        downloads,
+      }) => {
+        return `<div class='photo-card'>
+  <a href='${largeImageURL}'>
+    <img src='${webformatURL}' alt='${tags}' loading='lazy' />
+  </a>
+  <div class='info'>
+    <p class='info-item'>
+      <b>Likes</b>
+      ${likes}
+    </p>
+    <p class='info-item'>
+      <b>Views</b>
+      ${views}
+    </p>
+    <p class='info-item'>
+      <b>Comments</b>
+      ${comments}
+    </p>
+    <p class='info-item'>
+      <b>Downloads</b>
+      ${downloads}
+    </p>
   </div>
-  `)
-  .join("");
+</div>`;
+      }
+    ).join('');
 
-  gallery.insertAdjacentHTML("beforeend", markups);
+  refs.galleryItems.insertAdjacentHTML('beforeend', markup);
+}
 
-  if (typeof lightbox === "object") {
-  lightbox.destroy();
+let lightbox = new SimpleLightbox('.photo-card a', {
+  captions: true,
+  captionsData: 'alt',
+  captionDelay: 250,
+});
+
+let currentPage = 1;
+let currentHits = 0;
+let searchQuery = '';
+
+refs.form.addEventListener('submit', submitSearchForm);
+
+async function submitSearchForm(event) {
+  event.preventDefault();
+  searchQuery = event.currentTarget.searchQuery.value;
+  currentPage = 1;
+
+  if (searchQuery === '') {
+    return;
   }
 
-  lightbox = new SimpleLightbox(".gallery__item a");
+  const response = await fetchImages(searchQuery, currentPage);
+  currentHits = response.hits.length;
 
-  displayedImages += hits.length;
-  imgLeft();
-
-  if (displayedImages === 0) {
-    Notiflix.Notify.failure("Sorry, there are no images matching your search query. Please try again.");
-  } else if (displayedImages > 0 && displayedImages === totalOfHits) {
-    Notiflix.Notify.info("We're sorry, but you've reached the end of search results.");
+  if (response.totalHits > 40) {
+    refs.btnLoad.classList.remove('is-hidden');
+  } else {
+    refs.btnLoad.classList.add('is-hidden');
   }
 
-  if (pagination > 1) {
-    const { height: cardHeight } = document
-    .querySelector('.gallery .gallery__item').getBoundingClientRect();
+  try {
+    if (response.totalHits > 0) {
+      Notify.success(`Hooray! We found ${response.totalHits} images.`);
+      refs.galleryItems.innerHTML = '';
+      renderImages(response.hits);
+      lightbox.refresh();
+      refs.textCollections.classList.add('is-hidden');
 
-    window.scrollBy({
-      top: cardHeight * 2,
-      behavior: 'smooth',
-    });
+      const { height: cardHeight } = document
+        .querySelector('.gallery')
+        .firstElementChild.getBoundingClientRect();
+
+      window.scrollBy({
+        top: cardHeight * -100,
+        behavior: 'smooth',
+      });
+    }
+    if (response.totalHits === 0) {
+      refs.galleryItems.innerHTML = '';
+      Notify.failure(
+        'Sorry, there are no images matching your search query. Please try again.'
+      );
+      refs.btnLoad.classList.add('is-hidden');
+      refs.textCollections.classList.add('is-hidden');
+    }
+  } catch (error) {
+    console.log(error);
   }
 }
 
-function imgLeft() {
-  if (totalOfHits === displayedImages) {
-    loadMore.style.display = "none";
-  } else {
-    loadMore.style.display = "block";
+refs.btnLoad.addEventListener('click', clickBtnLoad);
+
+async function clickBtnLoad() {
+  currentPage += 1;
+  const response = await fetchImages(searchQuery, currentPage);
+  renderImages(response.hits);
+  lightbox.refresh();
+  currentHits += response.hits.length;
+
+  if (currentHits === response.totalHits) {
+    refs.btnLoad.classList.add('is-hidden');
+    refs.textCollections.classList.remove('is-hidden');
   }
 }
